@@ -45,6 +45,7 @@ from pydantic_monty import (
     MontyCrashedError,
     MontyDisconnectError,
     MontyRuntimeError,
+    MontyShutdown,
     MontySyntaxError,
     MontyTypingError,
     MountDir,
@@ -340,7 +341,7 @@ class MontyFailure:
     and the code that turns a failure into a retry reads only this.
     """
 
-    kind: Literal['syntax', 'typing', 'runtime', 'crashed', 'disconnected', 'other', 'panic', 'not_stored']
+    kind: Literal['syntax', 'typing', 'runtime', 'crashed', 'disconnected', 'shutdown', 'other', 'panic', 'not_stored']
     """`not_stored`: the server refused to store the session; `display` says why."""
     display: str = ''
     """The full report: `display()` for a sandbox error, `str()` for any other."""
@@ -383,6 +384,8 @@ class MontyFailure:
                 return cls('crashed', timed_out=error.timed_out)
             case MontyDisconnectError():
                 return cls('disconnected', cause=error.cause)
+            case MontyShutdown():
+                return cls('shutdown')
             case Exception():
                 return cls('other', display=str(error), type_name=type(error).__name__)
             case _:

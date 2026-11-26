@@ -1,4 +1,4 @@
-"""A loopback gRPC server for Monty transport tests, with refusal and subprocess bridge modes.
+"""A loopback gRPC server for Monty transport tests, with refusal, scripted, and subprocess bridge modes.
 
 `pydantic_monty.AsyncMontyRemote` opens one `/monty.v1.MontySession/Session` stream per worker. The
 stdio worker reads and writes the same protobuf messages with a four-byte little-endian length prefix,
@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import struct
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,10 +36,10 @@ class _RawCodec(CodecBase):
     def __content_subtype__(self) -> str:
         return 'proto'
 
-    def encode(self, message: Any, message_type: Any) -> bytes:  # pragma: no cover -- only bridged sessions (#8824)
+    def encode(self, message: Any, message_type: Any) -> bytes:
         return message
 
-    def decode(self, data: bytes, message_type: Any) -> Any:  # pragma: no cover -- only bridged sessions (#8824)
+    def decode(self, data: bytes, message_type: Any) -> Any:
         return data
 
 
@@ -51,6 +51,8 @@ class MontyRelay:
     """Refuse every stream with `UNAUTHENTICATED`, as a server does for a bad key."""
     refusal_causes: tuple[str, *tuple[str, ...]] | None = None
     """Refuse streams with one or more causes in order, repeating the last cause after exhaustion."""
+    session_handler: Callable[[Stream[bytes, bytes]], Awaitable[None]] | None = None
+    """Script an admitted session without spawning a worker."""
     url: str = ''
     metadata: list[Mapping[str, str]] = field(default_factory=list[Mapping[str, str]])
     _streams: list[Stream[bytes, bytes]] = field(default_factory=list[Stream[bytes, bytes]])
@@ -80,6 +82,9 @@ class MontyRelay:
             return
         if self.refuse:
             raise GRPCError(Status.UNAUTHENTICATED, 'unauthorized')
+        if self.session_handler is not None:
+            await stream.send_initial_metadata()
+            return await self.session_handler(stream)
         return await self._bridge(stream)  # pragma: no cover -- only the skipped #8824 tests bridge a session
 
     async def _bridge(self, stream: Stream[bytes, bytes]) -> None:  # pragma: no cover -- only the skipped #8824 tests
@@ -152,10 +157,14 @@ class _RelayServer(Server):
 
 @asynccontextmanager
 async def serve_monty_relay(
-    port: int = 0, *, refuse: bool = False, refusal_causes: tuple[str, *tuple[str, ...]] | None = None
+    port: int = 0,
+    *,
+    refuse: bool = False,
+    refusal_causes: tuple[str, *tuple[str, ...]] | None = None,
+    session_handler: Callable[[Stream[bytes, bytes]], Awaitable[None]] | None = None,
 ) -> AsyncGenerator[MontyRelay]:
     """Serve a relay with its URL set; one or more explicit causes override `refuse`."""
-    relay = MontyRelay(refuse=refuse, refusal_causes=refusal_causes)
+    relay = MontyRelay(refuse=refuse, refusal_causes=refusal_causes, session_handler=session_handler)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('127.0.0.1', port))

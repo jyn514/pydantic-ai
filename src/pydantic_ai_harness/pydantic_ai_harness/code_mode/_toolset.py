@@ -1603,6 +1603,14 @@ class CodeModeToolset(WrapperToolset[AgentDepsT]):
                 await run_state.reset()
                 _raise_usage_limit_exceeded(execution)
                 return ModelRetry(f'{self._worker_failure_message(failure)}{_started_calls_note(execution)}')
+            case 'shutdown':
+                await run_state.reset()
+                _raise_usage_limit_exceeded(execution)
+                message = (
+                    'The sandbox server shut down without executing the pending sandbox request. '
+                    'The session was reset. Re-run any imports and recreate any state you need.'
+                )
+                return ModelRetry(capture.prepend_to(message) + _started_calls_note(execution))
             case 'not_stored':
                 # Retrying soon would meet the same refusal, so the run fails with the reason.
                 await run_state.reset()

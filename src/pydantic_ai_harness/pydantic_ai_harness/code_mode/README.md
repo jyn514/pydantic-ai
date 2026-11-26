@@ -664,6 +664,9 @@ Errors the model can act on are returned as model retries:
   `TimeoutError` with a sandbox traceback does not by itself reset the REPL. An unclassified
   `MemoryError` that looks like a sandbox memory limit resets it. Exceeding the 10 MiB
   printed-output cap reports such an error.
+- If a server shutdown reaches Code Mode after SDK recovery was skipped or unsuccessful,
+  Code Mode resets the session without replaying the request.
+  The pending sandbox request did not run; if it was a reply to a tool call, the tool may already have run.
 - A worker crash, lost connection, or unexpected execution failure reports the session reset. Remote
   host-side error details, which can contain pool URLs or credentials, are left out of model
   retries; the original exception stays the retry's cause.

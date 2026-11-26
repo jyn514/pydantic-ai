@@ -506,6 +506,9 @@ Errors the model can act on are returned as model retries:
 - Terminal Monty execution limits reset the session. If Monty identifies a feed time limit, the retry asks the model to split work across smaller `run_code` calls. If it identifies a turn time limit, it asks for less work in one uninterrupted stretch of sandbox execution. Memory limits ask the model to use less memory. A classification Code Mode doesn't recognize also resets the session, without guessing the cause.
 - A pool's `request_timeout` and a remote `turn_timeout` reset the session and ask for less work per call. Remote `session_timeout` and `idle_timeout` errors explain that the session ended and state is lost.
 - When Monty identifies a `MemoryError` that looks like a sandbox memory limit as coming from a snippet or tool, Code Mode keeps the REPL unless it knows the session is unusable. For replies without a classification, Code Mode uses the diagnostic and traceback. A tool-raised `TimeoutError` with a sandbox traceback does not by itself reset the REPL. An unclassified `MemoryError` that looks like a sandbox memory limit resets it. Exceeding the 10 MiB printed-output cap reports such an error.
+- If a server shutdown reaches Code Mode after SDK recovery was skipped or unsuccessful,
+  Code Mode resets the session without replaying the request.
+  The pending sandbox request did not run; if it was a reply to a tool call, the tool may already have run.
 - A worker crash, lost connection, or unexpected execution failure reports the session reset. Remote host-side error details, which can contain pool URLs or credentials, are left out of model retries; the original exception stays the retry's cause.
 
 After a reset, the model must re-run imports and recreate state. The retry lists nested calls already started, so the model can avoid repeating side effects; Code Mode doesn't replay them.
