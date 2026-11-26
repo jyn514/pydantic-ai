@@ -108,7 +108,11 @@ Traceback (most recent call last):
   File "<python-input-0>", line 1, in <module>
     await check_input()
     ~~~~~~~~~~~~~~~~~~~
-Exception: Pass a date.\
+Exception: Pass a date.
+
+1 nested tool calls started before execution stopped:
+- check_input started; outcome unknown (it may already have changed external state)
+Account for all 1 before retrying; repeating a call repeats whatever it already did.\
 """)
 
     async def test_tool_failed_reraised_after_a_later_call_is_a_failed_result(self) -> None:
@@ -155,7 +159,11 @@ Runtime error:
 Traceback (most recent call last):
   File "<python-input-0>", line 5, in <module>
     raise Exception('Pick another day.')
-Exception: Pick another day.\
+Exception: Pick another day.
+
+1 nested tool calls started before execution stopped:
+- read_calendar started; outcome unknown (it may already have changed external state)
+Account for all 1 before retrying; repeating a call repeats whatever it already did.\
 """)
 
     async def test_later_model_retry_with_the_same_message_is_a_retry(self) -> None:
@@ -174,7 +182,12 @@ Traceback (most recent call last):
   File "<python-input-0>", line 5, in <module>
     await check_calendar()
     ~~~~~~~~~~~~~~~~~~~~~~
-Exception: No calendar is connected.\
+Exception: No calendar is connected.
+
+2 nested tool calls started before execution stopped:
+- read_calendar started; outcome unknown (it may already have changed external state)
+- check_calendar started; outcome unknown (it may already have changed external state)
+Account for all 2 before retrying; repeating a call repeats whatever it already did.\
 """)
 
     async def test_snippet_error_with_the_same_message_is_a_retry(self) -> None:
@@ -193,7 +206,11 @@ Traceback (most recent call last):
   File "<python-input-0>", line 5, in <module>
     {}['No calendar is connected.']
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-KeyError: No calendar is connected.\
+KeyError: No calendar is connected.
+
+1 nested tool calls started before execution stopped:
+- read_calendar started; outcome unknown (it may already have changed external state)
+Account for all 1 before retrying; repeating a call repeats whatever it already did.\
 """)
 
     async def test_tool_failed_beside_a_later_success_is_a_failed_result(self) -> None:

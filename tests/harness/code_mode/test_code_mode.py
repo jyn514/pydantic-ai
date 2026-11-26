@@ -1337,6 +1337,54 @@ class TestCodeMode:
         assert 'boom' in message
         assert 'restart' not in message
 
+    async def test_ordinary_runtime_retry_lists_started_calls_without_values(self) -> None:
+        value = 'synthetic-intermediate-value'
+        effects: list[str] = []
+
+        def read_value() -> str:
+            """Return an intermediate value for use inside the snippet."""
+            return value
+
+        def save_value(item: str) -> None:
+            """Change external state before raising."""
+            effects.append(item)
+            raise ValueError('synthetic-hidden-failure')
+
+        code = (
+            'item = await read_value()\n'
+            'try:\n'
+            "    await save_value(item=item + '-derived')\n"
+            'except Exception:\n'
+            '    pass\n'
+            "raise ValueError('snippet stopped')"
+        )
+
+        def model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            request = messages[-1]
+            assert isinstance(request, ModelRequest)
+            retry = next((part for part in request.parts if isinstance(part, ToolReturnPart)), None)
+            if retry is None:
+                return ModelResponse(parts=[ToolCallPart('run_code', {'code': code})])
+
+            assert retry.outcome == 'retried'
+            message = retry.model_response_str(wrap_if_error=False)
+            diagnostic, _, summary = message.partition('\n\n')
+            assert 'ValueError: snippet stopped' in diagnostic
+            assert value not in message
+            assert 'synthetic-hidden-failure' not in message
+            assert summary == (
+                '2 nested tool calls started before execution stopped:\n'
+                '- read_value returned\n'
+                '- save_value started; outcome unknown (it may already have changed external state)\n'
+                'Account for all 2 before retrying; repeating a call repeats whatever it already did.'
+            )
+            return ModelResponse(parts=[TextPart('done')])
+
+        agent = Agent(FunctionModel(model_fn), tools=[read_value, save_value], capabilities=[CodeMode()])
+        result = await agent.run('use the intermediate value')
+        assert result.output == 'done'
+        assert effects == [f'{value}-derived']
+
     async def test_budget_retry_names_calls_that_raised(self) -> None:
         """A call that raised is listed too, since a tool can apply a change before failing.
 

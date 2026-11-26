@@ -320,7 +320,9 @@ def _preview(value: Any, *, nested: bool = False) -> str:
     return f'<{type(value).__name__}>'
 
 
-def _describe_started_calls(calls: dict[str, ToolCallPart], returns: dict[str, ToolReturnPart]) -> str:
+def _describe_started_calls(
+    calls: dict[str, ToolCallPart], returns: dict[str, ToolReturnPart], *, include_previews: bool
+) -> str:
     """Report how many nested calls started, with per-call detail inside a size cap.
 
     Keyed off `calls` rather than `returns` because a call that raised has no recorded return, and
@@ -340,14 +342,19 @@ def _describe_started_calls(calls: dict[str, ToolCallPart], returns: dict[str, T
         # raised `ToolFailed`, or leave the default 'success'. Record any further outcome here
         # rather than letting it fall through and read as a return.
         if result is None:
-            outcome = 'did not finish, so it may have applied a partial change'
+            outcome = (
+                'did not finish, so it may have applied a partial change'
+                if include_previews
+                else 'started; outcome unknown (it may already have changed external state)'
+            )
         elif result.outcome == 'denied':
             outcome = 'was denied and did not run'
         elif result.outcome == 'failed':
-            outcome = f'failed: {_preview(result.content)}'
+            outcome = f'failed: {_preview(result.content)}' if include_previews else 'failed'
         else:
-            outcome = f'returned {_preview(result.content)}'
-        line = f'- {call.tool_name}({_preview(call.args)}) {outcome}'
+            outcome = f'returned {_preview(result.content)}' if include_previews else 'returned'
+        args = f'({_preview(call.args)})' if include_previews else ''
+        line = f'- {call.tool_name}{args} {outcome}'
         if used + len(line) > _RETRY_SUMMARY_MAX_CHARS:
             lines.append(f'- ... and {len(calls) - len(lines)} more not shown')
             break
@@ -816,13 +823,16 @@ class RunCodeExecution:
         )
 
 
-def _started_calls_note(execution: RunCodeExecution) -> str:
+def _started_calls_note(execution: RunCodeExecution, *, include_previews: bool = True) -> str:
     """The nested calls `execution` started, for a retry message, or `''` when none did."""
-    # A failure that resets the session has no traceback saying what already ran, so the
-    # model would otherwise repeat the side effects of calls that started.
+    # The traceback only shows where execution stopped. The model also needs to account
+    # for the calls that may already have had side effects.
     if not execution.nested_calls:
         return ''
-    return f'\n\n{_describe_started_calls(execution.nested_calls, execution.nested_returns)}'
+    summary = _describe_started_calls(
+        execution.nested_calls, execution.nested_returns, include_previews=include_previews
+    )
+    return f'\n\n{summary}'
 
 
 def _raise_usage_limit_exceeded(execution: RunCodeExecution) -> None:
@@ -866,20 +876,19 @@ def _raise_escaped_tool_failed(error: MontyFailure, execution: RunCodeExecution,
                 returns[call_id] = ToolReturnPart(
                     tool_name=tool_name, content=nested.message, tool_call_id=call_id, outcome='failed'
                 )
-        content += f'\n\n{_describe_started_calls(execution.nested_calls, returns)}'
+        content += f'\n\n{_describe_started_calls(execution.nested_calls, returns, include_previews=True)}'
     raise ToolFailed(content + reset_advice) from escaped
 
 
 def _runtime_failure_retry(
-    error: MontyFailure, execution: RunCodeExecution, *, reset_advice: str, report_started_calls: bool
+    error: MontyFailure, execution: RunCodeExecution, *, reset_advice: str, preview_started_calls: bool
 ) -> ModelRetry:
     """Build the retry for an uncaught sandbox runtime error, including any session-reset advice."""
     # Tool errors (e.g. a wrapped tool's `ModelRetry`) re-raise in the sandbox and surface
     # here if uncaught. Re-wrapping a `ModelRetry` is fine: the display keeps its message
     # and the model still gets a retry.
     message = f'Runtime error:\n{execution.capture.prepend_to(error.display)}'
-    if report_started_calls:
-        message += _started_calls_note(execution)
+    message += _started_calls_note(execution, include_previews=preview_started_calls)
     message += reset_advice
     typed_suspension_limit = error.runtime_classification == 'suspension_limit'
     if typed_suspension_limit and error.session_lost:
@@ -1586,14 +1595,14 @@ class CodeModeToolset(WrapperToolset[AgentDepsT]):
                     reset_advice = f'\n\n{_RUNTIME_RESET_MESSAGES[reset_reason]}'
                 _raise_escaped_tool_failed(failure, execution, reset_advice=reset_advice)
                 # With unclassified errors, also report likely limit failures that do not justify a reset.
-                report_started_calls = (
+                preview_started_calls = (
                     execution.budget_exhausted
                     or reset_reason is not None
                     or failure.runtime_classification == 'suspension_limit'
                     or (failure.runtime_classification is None and _exhausted_sandbox_limit(failure) is not None)
                 )
                 return _runtime_failure_retry(
-                    failure, execution, reset_advice=reset_advice, report_started_calls=report_started_calls
+                    failure, execution, reset_advice=reset_advice, preview_started_calls=preview_started_calls
                 )
             case 'crashed' | 'disconnected':
                 # The worker died mid-feed (e.g. the code exhausted its memory or hit the
