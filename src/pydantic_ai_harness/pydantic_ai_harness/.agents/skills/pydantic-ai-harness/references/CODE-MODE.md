@@ -148,6 +148,8 @@ An exhausted `max_suspensions` budget also does not by itself reset the session.
 confirms a classified limit and gives conditional guidance if the error is unclassified.
 A pool's `request_timeout` and a remote `turn_timeout` ask the model to do less work per call.
 Remote session and idle timeouts explain that state is lost.
+If SDK shutdown recovery does not complete, Code Mode discards the session without replaying
+the rejected request. A rejected reply does not undo the tool call that produced it.
 Remote host-side error details are omitted
 from retries because they may contain pool URLs or credentials; the original exception remains
 the cause for application-side diagnostics. Retries list nested calls that already started so

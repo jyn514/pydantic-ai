@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pydantic_monty
 import pytest
+from grpclib.server import Stream
 from pydantic_monty import (
     AsyncFutureSnapshot,
     AsyncMonty,
@@ -98,6 +99,109 @@ async def test_code_mode_runs_remotely(monty_relay: MontyRelay, tmp_path: Path) 
         {'output': 'mounted data\n', 'result': 50},
         [2, 4, 'barrier'],
     ]
+
+
+# WorkerEvent frames from monty.v1: FunctionCall("ping", call_id=7), Complete(7),
+# and a non-ephemeral session ID. These hand the real SDK a suspended turn without a subprocess.
+_PING_CALL = b'\x12\x08\x0a\x04ping\x20\x07'
+_COMPLETE_SEVEN = b'\x32\x08\x12\x06\x08\x01\x12\x02\x28\x0e'
+_SESSION_ID = b'\xe2\x01\x04park'
+
+
+async def _accept_configured_request(stream: Stream[bytes, bytes], *, standalone_tag: bytes, payload: bytes) -> None:
+    """Accept `Configure` plus a separate request or `Configure.first` on newer SDKs."""
+    configure = await stream.recv_message()
+    assert configure is not None and configure.startswith(b'\x0a')
+    # Match the length-delimited Feed.code or Load.state field, not bare text (also in type stubs).
+    if payload in configure:
+        return
+    await stream.send_message(b'\x52\x00' + _SESSION_ID)  # Ok
+    request = await stream.recv_message()
+    assert request is not None and request.startswith(standalone_tag) and payload in request
+
+
+@pytest.mark.parametrize('recovery', ['disabled', 'no_state', 'restored'])
+async def test_remote_shutdown_during_callback_reply(recovery: Literal['disabled', 'no_state', 'restored']) -> None:
+    """An escaped shutdown reports the rejected reply; SDK resume resends that reply, not the tool."""
+    replies: list[bytes] = []
+    handler_errors: list[Exception] = []
+    streams = 0
+
+    async def finish_checkout(stream: Stream[bytes, bytes]) -> None:
+        request = await stream.recv_message()
+        # Some SDK versions close the stream without an explicit Shutdown.
+        if request is not None:
+            assert request == b'\x52\x00'  # Shutdown
+            await stream.send_message(b'\x52\x00')  # Ok
+
+    async def serve(stream: Stream[bytes, bytes]) -> None:
+        nonlocal streams
+        streams += 1
+        if streams == 1:
+            await _accept_configured_request(stream, standalone_tag=b'\x1a', payload=b'\x0a\x06ping()')
+        elif recovery != 'restored':
+            # The only request on a fresh checkout is the model's next feed, not a replay.
+            await _accept_configured_request(stream, standalone_tag=b'\x1a', payload=b'\x0a\x057 + 0')
+            await stream.send_message(_COMPLETE_SEVEN)
+            await finish_checkout(stream)
+            return
+        else:
+            await _accept_configured_request(stream, standalone_tag=b'\x42', payload=b'\x0a\x04park')  # Load
+        await stream.send_message(_PING_CALL + _SESSION_ID)
+        reply = await stream.recv_message()
+        assert reply is not None and reply.startswith(b'\x22')  # ResumeCall
+        replies.append(reply)
+        if streams == 1:
+            # ShutdownDump, optionally carrying the parked session ID.
+            await stream.send_message(b'\x62\x00' if recovery == 'no_state' else b'\x62\x06\x0a\x04park')
+        else:
+            await stream.send_message(_COMPLETE_SEVEN)
+            next_feed = await stream.recv_message()
+            assert next_feed is not None and next_feed.startswith(b'\x1a') and b'7 + 0' in next_feed
+            await stream.send_message(_COMPLETE_SEVEN)
+            await finish_checkout(stream)
+
+    async def handle(stream: Stream[bytes, bytes]) -> None:
+        try:
+            await serve(stream)
+        except Exception as exc:
+            # grpclib logs handler failures instead of raising them in the test task.
+            handler_errors.append(exc)
+            raise
+
+    async with serve_monty_relay(session_handler=handle) as relay:
+        agent = Agent(
+            _snippets_model('ping()', '7 + 0'),
+            capabilities=[
+                CodeMode(monty_sandbox=lambda: AsyncMontyRemote(relay.url, auto_resume=recovery != 'disabled'))
+            ],
+        )
+        calls: list[int] = []
+
+        @agent.tool_plain(sequential=True)
+        def ping() -> int:
+            calls.append(7)
+            return 7
+
+        result = await agent.run('run one nested tool')
+
+    assert handler_errors == []
+    assert result.output == 'done'
+    assert calls == [7]
+    assert streams == 2
+    returns = _parts(result.all_messages(), ToolReturnPart)
+    assert returns[-1].content == 7
+    retries = _retries(result.all_messages())
+    if recovery == 'restored':
+        assert len(replies) == 2 and replies[0] == replies[1]
+        assert [part.content for part in returns] == [7, 7]
+        assert retries == []
+    else:
+        assert len(replies) == 1
+        (retry,) = retries
+        assert 'shut down without executing the pending sandbox request' in str(retry.content)
+        assert 'session was reset' in str(retry.content)
+        assert 'ping({}) returned 7' in str(retry.content)
 
 
 @pytest.mark.parametrize(
