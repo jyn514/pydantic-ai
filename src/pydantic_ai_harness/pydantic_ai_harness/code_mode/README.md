@@ -234,6 +234,11 @@ A nested tool that raises [`ToolFailed`](https://pydantic.dev/docs/ai/tools-tool
 
 Printed output over 10 MiB makes `run_code` return a model retry.
 
+The retry for an ordinary runtime error also reports any nested calls that started, in start
+order, with their names and recorded outcomes. It omits argument and result previews unless
+the retry includes a limit or session-loss report. A call with no recorded result has an unknown
+outcome and may already have changed external state; check before repeating it.
+
 ### Resource limits
 
 `resource_limits` defaults to 30 seconds of execution time and a 256 MiB heap. `max_duration_seconds`
