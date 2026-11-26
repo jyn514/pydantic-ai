@@ -258,8 +258,8 @@ advice is conditional because a tool error can have the same wording.
 `max_tool_calls` caps nested tool calls per `run_code` call (default 100). The budget is reserved
 before each call is scheduled, and a call past it fails at its call site in the sandbox. A snippet
 that catches the error can still return completed results. Otherwise the model retry gives the
-number of nested calls started and, per call, its arguments and whether it returned, did not finish
-(a tool can apply a change before it stops), or was denied. Arguments and results are previewed and
+number of nested calls started and, per call, its arguments and whether it returned, was denied, or
+has an unknown outcome. Arguments and results are previewed and
 the list is capped, saying how many entries it omitted, so a large payload can't inflate the retry;
 the exact total tells the model calls are missing. Nothing stops the model from calling those tools
 again.
@@ -655,9 +655,11 @@ Errors the model can act on are returned as model retries:
   asks for less work in one uninterrupted stretch of sandbox execution. Memory limits ask the
   model to use less memory. A classification Code Mode doesn't recognize also resets the session,
   without guessing the cause.
-- A pool's `request_timeout` and a remote `turn_timeout` reset the session and ask for less work per
-  call. Remote `session_timeout` and `idle_timeout` errors explain that the session ended and state
-  is lost.
+- A local pool's `request_timeout` resets the session and asks for less work per call.
+- Remote `session_timeout` and `idle_timeout` distinguish reaching the session lifetime from expiring while idle.
+- Remote `turn_timeout` identifies the relay's turn deadline. If the server reports that a
+  hosted watchdog deadline ended the session, the retry identifies it separately. Both ask
+  for smaller steps.
 - When Monty identifies a `MemoryError` that looks like a sandbox memory limit as coming from a
   snippet or tool, Code Mode keeps the REPL unless it knows the session is unusable. For replies
   without a classification, Code Mode uses the diagnostic and traceback. A tool-raised

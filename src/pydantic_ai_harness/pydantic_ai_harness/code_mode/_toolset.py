@@ -340,7 +340,7 @@ def _describe_started_calls(calls: dict[str, ToolCallPart], returns: dict[str, T
         # raised `ToolFailed`, or leave the default 'success'. Record any further outcome here
         # rather than letting it fall through and read as a return.
         if result is None:
-            outcome = 'did not finish, so it may have applied a partial change'
+            outcome = 'started; outcome unknown (it may already have changed external state)'
         elif result.outcome == 'denied':
             outcome = 'was denied and did not run'
         elif result.outcome == 'failed':
@@ -1537,16 +1537,19 @@ class CodeModeToolset(WrapperToolset[AgentDepsT]):
                 if error.timed_out
                 else 'The code crashed the sandbox worker and the session was reset. Revise the code and try again.'
             )
-        if error.cause == 'turn_timeout':
-            return _TIME_LIMIT_MESSAGE
-        if error.cause in ('session_timeout', 'idle_timeout'):
-            return (
-                'The sandbox session ended; state is lost. Re-run any imports, recreate any state '
-                'you need, and continue in a fresh session.'
-            )
-        return (
-            'The sandbox connection was lost and the session was reset. Re-run any imports, '
-            'recreate any state you need, and try again.'
+        match error.cause:
+            case 'idle_timeout':
+                reason = 'The sandbox session expired while idle.'
+            case 'session_timeout':
+                reason = 'The sandbox session reached its lifetime limit.'
+            case 'turn_timeout':
+                reason = 'The remote sandbox turn reached the relay deadline.'
+            case 'worker_watchdog':
+                reason = 'The hosted watchdog deadline expired and ended the sandbox session.'
+            case _:
+                reason = 'The sandbox connection was lost.'
+        return f'{reason} The session was reset. Re-run any imports and recreate any state you need.' + (
+            ' Use smaller steps.' if error.cause in ('turn_timeout', 'worker_watchdog') else ''
         )
 
     async def _feed_failure_retry(
@@ -1596,10 +1599,8 @@ class CodeModeToolset(WrapperToolset[AgentDepsT]):
                     failure, execution, reset_advice=reset_advice, report_started_calls=report_started_calls
                 )
             case 'crashed' | 'disconnected':
-                # The worker died mid-feed (e.g. the code exhausted its memory or hit the
-                # request timeout) and the REPL state died with it; the pool replaces the
-                # worker transparently. Reset so the retry starts from a fresh,
-                # type-checked session.
+                # This checkout is no longer usable. An unexplained disconnect need not mean
+                # the worker died, and it does not establish whether the pending request ran.
                 await run_state.reset()
                 _raise_usage_limit_exceeded(execution)
                 return ModelRetry(f'{self._worker_failure_message(failure)}{_started_calls_note(execution)}')

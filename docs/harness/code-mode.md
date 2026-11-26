@@ -220,7 +220,7 @@ Sleep isn't execution time and has its own per-snippet allowance of `max_duratio
 
 Monty also caps cumulative suspensions with `max_suspensions` (default 1,000 per session, shared by consecutive snippets). External calls, OS callbacks, name lookups, and future resolutions each count, so it isn't a tool-call count. Once it's exhausted, host interactions fail, though pure Python on existing state may work, and `run_code` returns the started calls with restart guidance: check partial results first, since `restart: true` discards REPL state and replaying completed calls repeats side effects. Nothing restarts or replays automatically. When Monty identifies the limit, the retry confirms the budget is exhausted. For errors without a classification, the restart advice is conditional because a tool error can have the same wording.
 
-`max_tool_calls` caps nested tool calls per `run_code` call (default 100). The budget is reserved before each call is scheduled, and a call past it fails at its call site in the sandbox. A snippet that catches the error can still return completed results. Otherwise the model retry gives the number of nested calls started and, per call, its arguments and whether it returned, did not finish (a tool can apply a change before it stops), or was denied. Arguments and results are previewed and the list is capped, saying how many entries it omitted, so a large payload can't inflate the retry; the exact total tells the model calls are missing. Nothing stops the model from calling those tools again.
+`max_tool_calls` caps nested tool calls per `run_code` call (default 100). The budget is reserved before each call is scheduled, and a call past it fails at its call site in the sandbox. A snippet that catches the error can still return completed results. Otherwise the model retry gives the number of nested calls started and, per call, its arguments and whether it returned, was denied, or has an unknown outcome. Arguments and results are previewed and the list is capped, saying how many entries it omitted, so a large payload can't inflate the retry; the exact total tells the model calls are missing. Nothing stops the model from calling those tools again.
 
 To override the limits:
 
@@ -504,7 +504,11 @@ Errors the model can act on are returned as model retries:
 - Syntax, type, and ordinary runtime errors include the sandbox's diagnostic.
 - An uncaught `RecursionError` from exceeding the sandbox recursion-depth limit includes the Python diagnostic and does not by itself reset the session.
 - Terminal Monty execution limits reset the session. If Monty identifies a feed time limit, the retry asks the model to split work across smaller `run_code` calls. If it identifies a turn time limit, it asks for less work in one uninterrupted stretch of sandbox execution. Memory limits ask the model to use less memory. A classification Code Mode doesn't recognize also resets the session, without guessing the cause.
-- A pool's `request_timeout` and a remote `turn_timeout` reset the session and ask for less work per call. Remote `session_timeout` and `idle_timeout` errors explain that the session ended and state is lost.
+- A local pool's `request_timeout` resets the session and asks for less work per call.
+- Remote `session_timeout` and `idle_timeout` distinguish reaching the session lifetime from expiring while idle.
+- Remote `turn_timeout` identifies the relay's turn deadline. If the server reports that a
+  hosted watchdog deadline ended the session, the retry identifies it separately. Both ask
+  for smaller steps.
 - When Monty identifies a `MemoryError` that looks like a sandbox memory limit as coming from a snippet or tool, Code Mode keeps the REPL unless it knows the session is unusable. For replies without a classification, Code Mode uses the diagnostic and traceback. A tool-raised `TimeoutError` with a sandbox traceback does not by itself reset the REPL. An unclassified `MemoryError` that looks like a sandbox memory limit resets it. Exceeding the 10 MiB printed-output cap reports such an error.
 - If a server shutdown reaches Code Mode after SDK recovery was skipped or unsuccessful,
   Code Mode resets the session without replaying the request.

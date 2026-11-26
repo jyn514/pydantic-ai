@@ -408,7 +408,7 @@ async def test_disconnect_mid_snippet_reports_started_calls(monty_relay: MontyRe
 
     (retry,) = _retries(result.all_messages())
     assert 'sandbox connection was lost' in str(retry.content)
-    assert 'drop_connection({}) did not finish' in str(retry.content)
+    assert 'drop_connection({}) started; outcome unknown' in str(retry.content)
 
 
 _SECRET = 'https://alice:secret@sandbox.example.com/?token=private Bearer factory-key'
@@ -632,9 +632,13 @@ class TestCodeModeErrorRouting:
         [
             (_CrashedError(True, _SECRET), 'ran longer than its time limit'),
             (_CrashedError(False, _SECRET), 'crashed the sandbox worker'),
-            (_DisconnectError('turn_timeout', _SECRET), 'ran longer than its time limit'),
-            (_DisconnectError('session_timeout', _SECRET), 'session ended; state is lost'),
-            (_DisconnectError('idle_timeout', _SECRET), 'session ended; state is lost'),
+            (_DisconnectError('turn_timeout', _SECRET), 'remote sandbox turn reached the relay deadline'),
+            (
+                _DisconnectError('worker_watchdog', _SECRET),
+                'hosted watchdog deadline expired and ended the sandbox session',
+            ),
+            (_DisconnectError('session_timeout', _SECRET), 'session reached its lifetime limit'),
+            (_DisconnectError('idle_timeout', _SECRET), 'session expired while idle'),
             (_DisconnectError(None, _SECRET), 'sandbox connection was lost'),
             (_DisconnectError('unknown', _SECRET), 'sandbox connection was lost'),
             (RuntimeError(_SECRET), 'Code execution failed and the session was reset'),
