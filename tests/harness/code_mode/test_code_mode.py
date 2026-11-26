@@ -1188,7 +1188,7 @@ class TestCodeMode:
         message = exc_info.value.message
         assert 'memory limit exceeded' in message
         assert "add({'a': 1, 'b': 2}) returned 3" in message
-        assert "fail_after_effect({'value': 73}) did not finish, so it may have applied a partial change" in message
+        assert "fail_after_effect({'value': 73}) started; outcome unknown" in message
         assert 'The sandbox ran out of memory and the session was reset.' in message
         with pytest.raises(ModelRetry, match='Name `saved` used when not defined'):
             await wrapper.call_tool('run_code', {'code': 'saved'}, ctx, tools['run_code'])
@@ -1374,7 +1374,7 @@ class TestCodeMode:
             )
 
         message = exc_info.value.message
-        assert "flaky({'value': 1}) did not finish, so it may have applied a partial change" in message
+        assert "flaky({'value': 1}) started; outcome unknown (it may already have changed external state)" in message
         assert "flaky({'value': 0}) returned 0" in message
 
     async def test_budget_retry_marks_denied_calls_as_not_run(self) -> None:

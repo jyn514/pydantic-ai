@@ -134,7 +134,7 @@ checking
 No calendar is connected.
 
 3 nested tool calls started before execution stopped:
-- check_input({}) did not finish, so it may have applied a partial change
+- check_input({}) started; outcome unknown (it may already have changed external state)
 - read_calendar({}) failed: 'No calendar is connected.'
 - ping({}) returned 'pong'
 Account for all 3 before retrying; repeating a call repeats whatever it already did.\

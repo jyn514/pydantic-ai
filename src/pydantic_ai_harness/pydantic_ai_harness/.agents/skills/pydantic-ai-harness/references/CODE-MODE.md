@@ -146,8 +146,9 @@ printed-output cap reports such an error.
 A `RecursionError` from the sandbox recursion-depth limit does not by itself reset the session.
 An exhausted `max_suspensions` budget also does not by itself reset the session. The retry
 confirms a classified limit and gives conditional guidance if the error is unclassified.
-A pool's `request_timeout` and a remote `turn_timeout` ask the model to do less work per call.
-Remote session and idle timeouts explain that state is lost.
+A local pool's `request_timeout`, a relay turn deadline, and a hosted watchdog deadline that
+ended the session are separate causes that ask the model to do less work at a time. Session
+lifetime and idle expiry ask the model to rebuild state.
 If SDK shutdown recovery does not complete, Code Mode discards the session without replaying
 the rejected request. A rejected reply does not undo the tool call that produced it.
 Remote host-side error details are omitted
